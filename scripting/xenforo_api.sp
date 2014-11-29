@@ -39,6 +39,7 @@ public Plugin:myinfo =
 public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 {	
 	CreateNative("XenForo_GrabClientID", Native_GrabClientID);
+	CreateNative("XenForo_IsProcessed", Native_IsProcessed);
 	CreateNative("XenForo_TExecute", Native_TExecute);
 	CreateNative("XenForo_TQuery", Native_TQuery);
 	CreateNative("XenForo_LogToFile", Native_Log);
@@ -85,7 +86,7 @@ public OnConfigsExecuted()
 	
 	if (bLateLoad)
 	{
-		decl String:sAuth[64];
+		new String:sAuth[64];
 		for (new i = 1; i <= MaxClients; i++)
 		{				
 			if (IsClientConnected(i))
@@ -132,10 +133,10 @@ public OnClientAuthorized(client, const String:sSteamID[])
 {
 	if (!cv_Enabled || IsFakeClient(client)) return;
 	
-	decl String:sCommunityID[64];
+	new String:sCommunityID[64];
 	SteamIDToCommunityID(sSteamID, sCommunityID, sizeof(sCommunityID));
 	
-	decl String:sQuery[256];
+	new String:sQuery[256];
 	Format(sQuery, sizeof(sQuery), "SELECT user_id FROM xf_user_external_auth WHERE provider = 'steam' AND provider_key = '%s'", sCommunityID);
 	SQL_TQuery_XenForo(GrabUserID, sQuery, GetClientUserId(client));
 	XenForo_Log(TRACE, "OnClientAuthorized - %s [%s] - Query: %s", sSteamID, sCommunityID, sQuery);
@@ -172,7 +173,7 @@ public OnSQLConnect(Handle:owner, Handle:hndl, const String:error[], any:data)
 {
 	if (hndl == INVALID_HANDLE)
 	{
-		decl String:sBuffer[64];
+		new String:sBuffer[64];
 		Format(sBuffer, sizeof(sBuffer), "Error connecting to SQL: '%s'", error);
 		XenForo_Log(ERROR, sBuffer);
 		SetFailState(sBuffer);
@@ -197,7 +198,7 @@ SQL_TQuery_XenForo(SQLTCallback:callback, const String:query[], any:data = 0, DB
 
 SteamIDToCommunityID(const String:sSteamID[], String:sCommunityID[], size)
 {
-    decl String:sBuffer[3][32];
+    new String:sBuffer[3][32];
     ExplodeString(sSteamID, ":", sBuffer, 3, 32);
     new accountID = StringToInt(sBuffer[2]) * 2 + StringToInt(sBuffer[1]);
 
@@ -226,6 +227,15 @@ public Native_GrabClientID(Handle:plugin, numParams)
 	}
 	
 	return iUserID[client];
+}
+
+public Native_IsProcessed(Handle:plugin, numParams)
+{
+	if (!cv_Enabled) ThrowNativeError(SP_ERROR_INDEX, "Native is currently disabled.");
+
+	new client = GetNativeCell(1);
+	
+	return bIsProcessed[client];
 }
 
 public Native_TExecute(Handle:plugin, numParams)
@@ -258,7 +268,7 @@ public Native_TQuery(Handle:plugin, numParams)
 	new size;
 	GetNativeStringLength(2, size);
 	
-	decl String:sQuery[size];
+	new String:sQuery[size];
 	GetNativeString(2, sQuery, size);
 	
 	new SQLTCallback:callback = SQLTCallback:GetNativeCell(1);
@@ -295,18 +305,18 @@ public Native_Log(Handle:plugin, numParams)
 	
 	new ELOG_LEVEL:log_level = ELOG_LEVEL:GetNativeCell(1);
 	
-	decl String:sBuffer[1024];
+	new String:sBuffer[1024];
 	FormatNativeString(0, 2, 3, sizeof(sBuffer), _, sBuffer);
 	XenForo_Log(log_level, sBuffer);
 }
 
 stock XenForo_Log(ELOG_LEVEL:level = DEFAULT, const String:format[], any:...)
 {
-	decl String:sBuffer[256];
+	new String:sBuffer[256];
 	VFormat(sBuffer, sizeof(sBuffer), format, 3);
 	//PrintToServer(sBuffer);
 	
-	decl String:sDate[20];
+	new String:sDate[20];
 	FormatTime(sDate, sizeof(sDate), "%Y-%m-%d", GetTime());
 		
 	switch (cv_Logging)
