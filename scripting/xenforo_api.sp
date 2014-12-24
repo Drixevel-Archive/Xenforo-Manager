@@ -9,13 +9,13 @@
 
 #define PLUGIN_NAME     "XenForo API"
 #define PLUGIN_AUTHOR   "Keith Warren(Jack of Designs)"
-#define PLUGIN_VERSION  "1.0.0"
+#define PLUGIN_VERSION  "1.0.1"
 #define PLUGIN_DESCRIPTION	"API for Xenforo forum installations."
 #define PLUGIN_CONTACT  "http://www.jackofdesigns.com/"
 
-new Handle:ConVars[3] = {INVALID_HANDLE, ...};
+new Handle:ConVars[5] = {INVALID_HANDLE, ...};
 
-new bool:cv_Enabled, cv_Logging;
+new bool:cv_Enabled, cv_Logging, String:cv_sDatabaseEntry[255], bool:cv_bServerPrints;
 
 new Handle:hSQLConnection;
 
@@ -64,6 +64,8 @@ public OnPluginStart()
 	ConVars[0] = AutoExecConfig_CreateConVar("xenforo_api_version", PLUGIN_VERSION, PLUGIN_NAME, FCVAR_REPLICATED|FCVAR_NOTIFY|FCVAR_PLUGIN|FCVAR_SPONLY|FCVAR_DONTRECORD);
 	ConVars[1] = AutoExecConfig_CreateConVar("sm_xenforo_api_status", "1", "Status of the plugin: (1 = on, 0 = off)", FCVAR_PLUGIN, true, 0.0, true, 1.0);
 	ConVars[2] = AutoExecConfig_CreateConVar("sm_xenforo_api_logging", "2", "Status for plugin logging: (2 = all, 1 = errors only, 0 = off)", FCVAR_PLUGIN, true, 0.0, true, 2.0);
+	ConVars[3] = AutoExecConfig_CreateConVar("sm_xenforo_api_database_config", "xenforo", "Name of the config entry to use under database settings: (default: 'xenforo', empty = 'default')", FCVAR_PLUGIN);
+	ConVars[4] = AutoExecConfig_CreateConVar("sm_xenforo_api_serverprints", "0", "Print all logs made to server console: (1 = on, 0 = off) (WARNING: WILL SPAM)", FCVAR_PLUGIN, true, 0.0, true, 1.0);
 	
 	AutoExecConfig_ExecuteFile();
 
@@ -72,17 +74,74 @@ public OnPluginStart()
 		HookConVarChange(ConVars[i], HandleCvars);
 	}
 	
-	SQL_TConnect(OnSQLConnect, "xenforo");
+	RegConsoleCmd("sm_xfid", ShowID);
 	
 	AutoExecConfig_CleanFile();
-	
-	XenForo_Log(DEFAULT, "XenForo API has been loaded successfully.");
+}
+
+public Action:ShowID(client, args)
+{
+	ReplyToCommand(client, "Your XenForo ID is %i.", iUserID[client]);
+	return Plugin_Handled;
 }
 
 public OnConfigsExecuted()
 {
 	cv_Enabled = GetConVarBool(ConVars[1]);
 	cv_Logging = GetConVarInt(ConVars[2]);
+	GetConVarString(ConVars[3], cv_sDatabaseEntry, sizeof(cv_sDatabaseEntry));
+	cv_bServerPrints = GetConVarBool(ConVars[4]);
+	
+	SQL_TConnect(OnSQLConnect, strlen(cv_sDatabaseEntry) != 0 ? cv_sDatabaseEntry : "default");
+		
+	XenForo_Log(DEFAULT, "XenForo API has been loaded successfully.");
+}
+
+public HandleCvars (Handle:cvar, const String:oldValue[], const String:newValue[])
+{
+	if (StrEqual(oldValue, newValue, true)) return;
+	
+	new iNewValue = StringToInt(newValue);
+	
+	if (cvar == ConVars[0])
+	{
+		SetConVarString(ConVars[0], PLUGIN_VERSION);
+	}
+	else if (cvar == ConVars[1])
+	{
+		cv_Enabled = bool:iNewValue;
+	}
+	else if (cvar == ConVars[2])
+	{
+		cv_Logging = iNewValue;
+	}
+	else if (cvar == ConVars[3])
+	{
+		GetConVarString(ConVars[3], cv_sDatabaseEntry, sizeof(cv_sDatabaseEntry));
+	}
+	else if (cvar == ConVars[4])
+	{
+		cv_bServerPrints = bool:iNewValue;
+	}
+}
+
+public OnSQLConnect(Handle:owner, Handle:hndl, const String:sError[], any:data)
+{
+	XenForo_Log(DEFAULT, "Connecting to XenForo database...");
+	
+	if (hndl == INVALID_HANDLE)
+	{
+		XenForo_Log(ERROR, "SQL ERROR: Error connecting to database - '%s'", sError);
+		SetFailState("Error connecting to XenForo database, please verify configurations & connections. (Check Error Logs)");
+		return;
+	}
+	
+	hSQLConnection = hndl;
+	
+	Call_StartForward(hSFW_OnConnected);
+	Call_Finish();
+	
+	XenForo_Log(DEFAULT, "XenForo API has connected to SQL successfully.");
 	
 	if (bLateLoad)
 	{
@@ -100,26 +159,7 @@ public OnConfigsExecuted()
 				OnClientAuthorized(i, sAuth);
 			}
 		}
-	}
-}
-
-public HandleCvars (Handle:cvar, const String:oldValue[], const String:newValue[])
-{
-	if (StrEqual(oldValue, newValue, true)) return;
-
-	new iNewValue = StringToInt(newValue);
-
-	if (cvar == ConVars[0])
-	{
-		SetConVarString(ConVars[0], PLUGIN_VERSION);
-	}
-	else if (cvar == ConVars[1])
-	{
-		cv_Enabled = bool:iNewValue;
-	}
-	else if (cvar == ConVars[2])
-	{
-		cv_Logging = iNewValue;
+		bLateLoad = false;
 	}
 }
 
@@ -133,66 +173,70 @@ public OnClientAuthorized(client, const String:sSteamID[])
 {
 	if (!cv_Enabled || IsFakeClient(client)) return;
 	
+	XenForo_Log(DEFAULT, "Starting process for user %N...", client);
+	
 	new String:sCommunityID[64];
 	SteamIDToCommunityID(sSteamID, sCommunityID, sizeof(sCommunityID));
 	
 	new String:sQuery[256];
 	Format(sQuery, sizeof(sQuery), "SELECT user_id FROM xf_user_external_auth WHERE provider = 'steam' AND provider_key = '%s'", sCommunityID);
 	SQL_TQuery_XenForo(GrabUserID, sQuery, GetClientUserId(client));
-	XenForo_Log(TRACE, "OnClientAuthorized - %s [%s] - Query: %s", sSteamID, sCommunityID, sQuery);
+	XenForo_Log(TRACE, "SQL QUERY: OnClientAuthorized - Query: %s", sQuery);
 }
 
-public GrabUserID(Handle:owner, Handle:hndl, const String:error[], any:data)
+public GrabUserID(Handle:owner, Handle:hndl, const String:sError[], any:data)
 {
-	if (hndl == INVALID_HANDLE)
-	{
-		XenForo_Log(ERROR, "Error grabbing UserID: '%s'", error);
-		return;
-	}
-	
 	new client = GetClientOfUserId(data);
 	
-	if (!client)
+	if (!IsClientConnected(client))
 	{
+		XenForo_Log(ERROR, "Error grabbing User Data: (Client is not Connected)");
 		return;
 	}
 	
-	if (SQL_FetchRow(hndl) && !SQL_IsFieldNull(hndl, 0))
+	if (!IsClientAuthorized(client))
 	{
+		XenForo_Log(ERROR, "Error grabbing User Data: (Client is not Authorized)");
+		return;
+	}
+	
+	XenForo_Log(DEFAULT, "Retrieving data for %N...", client);
+	
+	if (hndl == INVALID_HANDLE)
+	{
+		XenForo_Log(ERROR, "SQL ERROR: Error grabbing User Data for '%N': '%s'", client, sError);
+		return;
+	}
+	
+	if (SQL_FetchRow(hndl))
+	{
+		if (SQL_IsFieldNull(hndl, 0))
+		{
+			XenForo_Log(ERROR, "Error retrieving User Data: (Field is null)");
+			return;
+		}
+		
 		iUserID[client] = SQL_FetchInt(hndl, 0);
 		bIsProcessed[client] = true;
-		XenForo_Log(TRACE, "GrabUserID [%N] - Processed user successfully.", client);
 		
 		Call_StartForward(hSFW_OnProcessed);
 		Call_PushCell(client);
 		Call_Finish();
+		
+		XenForo_Log(DEFAULT, "User '%N' has been processed successfully!", client);
 	}
-}
-
-public OnSQLConnect(Handle:owner, Handle:hndl, const String:error[], any:data)
-{
-	if (hndl == INVALID_HANDLE)
+	else
 	{
-		new String:sBuffer[64];
-		Format(sBuffer, sizeof(sBuffer), "Error connecting to SQL: '%s'", error);
-		XenForo_Log(ERROR, sBuffer);
-		SetFailState(sBuffer);
-		return;
+		XenForo_Log(ERROR, "Error retrieving User Data: (Row not fetched)");
 	}
-	
-	hSQLConnection = hndl;
-	
-	Call_StartForward(hSFW_OnConnected);
-	Call_Finish();
-	
-	XenForo_Log(DEFAULT, "XenForo API has connected to SQL successfully.");
 }
 
-SQL_TQuery_XenForo(SQLTCallback:callback, const String:query[], any:data = 0, DBPriority:prio=DBPrio_Normal)
+SQL_TQuery_XenForo(SQLTCallback:callback, const String:sQuery[], any:data = 0, DBPriority:prio=DBPrio_Normal)
 {
 	if (hSQLConnection != INVALID_HANDLE)
 	{
-		SQL_TQuery(hSQLConnection, callback, query, data, prio);
+		SQL_TQuery(hSQLConnection, callback, sQuery, data, prio);
+		XenForo_Log(TRACE, "SQL Executed: %s", sQuery);
 	}
 }
 
@@ -251,6 +295,7 @@ public Native_TExecute(Handle:plugin, numParams)
 	new DBPriority:prio = DBPriority:GetNativeCell(2);
 	
 	SQL_TQuery_XenForo(Void_Callback, sQuery, 0, prio);
+	XenForo_Log(ERROR, "SQL QUERY: XenForo_TExecute - Query: '%s'", sQuery);
 }
 
 public Void_Callback(Handle:owner, Handle:hndl, const String:error[], any:data)
@@ -281,6 +326,7 @@ public Native_TQuery(Handle:plugin, numParams)
 	WritePackCell(hPack, data);
 	
 	SQL_TQuery_XenForo(Query_Callback, sQuery, hPack, prio);
+	XenForo_Log(ERROR, "SQL QUERY: XenForo_TQuery - Query: '%s'", sQuery);
 }
 
 public Query_Callback(Handle:owner, Handle:hndl, const String:error[], any:data)
@@ -310,22 +356,6 @@ public Native_Log(Handle:plugin, numParams)
 	XenForo_Log(log_level, sBuffer);
 }
 
-stock XenForo_Log(ELOG_LEVEL:level = DEFAULT, const String:format[], any:...)
-{
-	new String:sBuffer[256];
-	VFormat(sBuffer, sizeof(sBuffer), format, 3);
-	//PrintToServer(sBuffer);
-	
-	new String:sDate[20];
-	FormatTime(sDate, sizeof(sDate), "%Y-%m-%d", GetTime());
-		
-	switch (cv_Logging)
-	{
-		case 2: Log_File("Xenforo", "xenforo", sDate, level, sBuffer);
-		case 1: Log_Error("Xenforo", "xenforo", sDate, sBuffer);
-	}
-}
-
 public Native_IsConnected(Handle:plugin, numParams)
 {
 	if (!cv_Enabled) ThrowNativeError(SP_ERROR_INDEX, "Native is currently disabled.");
@@ -335,4 +365,21 @@ public Native_IsConnected(Handle:plugin, numParams)
 		return true;
 	}
 	return false;
+}
+
+XenForo_Log(ELOG_LEVEL:level = DEFAULT, const String:format[], any:...)
+{
+	new String:sBuffer[256];
+	VFormat(sBuffer, sizeof(sBuffer), format, 3);
+	
+	if (cv_bServerPrints) PrintToServer(sBuffer);
+	
+	new String:sDate[20];
+	FormatTime(sDate, sizeof(sDate), "%Y-%m-%d", GetTime());
+		
+	switch (cv_Logging)
+	{
+		case 2: Log_File("Xenforo", "xenforo", sDate, level, sBuffer);
+		case 1: Log_Error("Xenforo", "xenforo", sDate, sBuffer);
+	}
 }
