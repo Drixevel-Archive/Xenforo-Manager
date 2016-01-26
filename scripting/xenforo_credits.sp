@@ -2,32 +2,35 @@
 
 //Required Includes
 #include <sourcemod>
-#include <morecolors>
+#include <multicolors>
+#include <extended_logging>
+#include <xenforo/xenforo_api>
+#include <xenforo/xenforo_credits>
 
-//API Natives/Forwards
-#include <xenforo_api>
-#include <xenforo_credits>
+//New Syntax
+#pragma newdecls required
 
+//Defines
 #define PLUGIN_NAME     "XenForo Credits Plugin"
-#define PLUGIN_AUTHOR   "Keith Warren(Jack of Designs)"
+#define PLUGIN_AUTHOR   "Keith Warren(Drixevel)"
 #define PLUGIN_VERSION  "1.0.1"
 #define PLUGIN_DESCRIPTION	"Retrieves credits from XenForo API of XenForo Installation."
-#define PLUGIN_CONTACT  "http://www.jackofdesigns.com/"
+#define PLUGIN_CONTACT  "http://www.drixevel.com/"
 
-new bool:bLateLoad;
+bool bLateLoad;
 
-new iCredits[MAXPLAYERS+1];
+int iCredits[MAXPLAYERS + 1];
 
-public Plugin:myinfo =
+public Plugin myinfo = 
 {
-	name = PLUGIN_NAME,
-	author = PLUGIN_AUTHOR,
-	description = PLUGIN_DESCRIPTION,
-	version = PLUGIN_VERSION,
+	name = PLUGIN_NAME, 
+	author = PLUGIN_AUTHOR, 
+	description = PLUGIN_DESCRIPTION, 
+	version = PLUGIN_VERSION, 
 	url = PLUGIN_CONTACT
 };
 
-public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
+public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
 {
 	CreateNative("XenForo_GrabCredits", Native_GrabCredits);
 	CreateNative("XenForo_GiveCredits", Native_GiveCredits);
@@ -39,68 +42,98 @@ public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 	return APLRes_Success;
 }
 
-public OnPluginStart()
+public void OnPluginStart()
 {
-	new Float:fTime = GetRandomFloat(60.0, 180.0);
-	CreateTimer(fTime, GiveCredits_Timed, INVALID_HANDLE, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	LoadTranslations("common.phrases");
+	
+	float fTime = GetRandomFloat(60.0, 180.0);
+	CreateTimer(fTime, GiveCredits_Timed, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
+	
+	RegConsoleCmd("sm_creditsamount", CreditsAmount);
 }
 
-public OnConfigsExecuted()
+public void OnConfigsExecuted()
 {
-	if (bLateLoad && XenForo_IsConnected())
+	if (bLateLoad)
 	{
-		for (new i = 1; i <= MaxClients; i++)
+		if (XenForo_IsConnected())
 		{
-			if (XenForo_IsProcessed(i))
+			for (int i = 1; i <= MaxClients; i++)
 			{
-				XF_OnProcessed(i);
+				if (XenForo_IsProcessed(i))
+				{
+					XF_OnProcessed(i);
+				}
 			}
+		}
+		
+		bLateLoad = false;
+	}
+}
+
+public Action CreditsAmount(int client, int args)
+{
+	if (!IsClientInGame(client))
+	{
+		CReplyToCommand(client, "%t", "Command is in-game only");
+		return Plugin_Handled;
+	}
+	
+	if (!XenForo_IsProcessed(client))
+	{
+		CReplyToCommand(client, "You are currently not processed, please try again later.");
+		return Plugin_Handled;
+	}
+	
+	CPrintToChat(client, "Your current amount of credits is %i.", iCredits[client]);
+	
+	return Plugin_Handled;
+}
+
+public Action GiveCredits_Timed(Handle hTimer)
+{
+	int amount = GetRandomInt(10, 50);
+	
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (IsClientInGame(i) && !IsFakeClient(i) && XenForo_IsProcessed(i))
+		{
+			GiveClientCredits(i, amount);
 		}
 	}
 }
 
-public Action:GiveCredits_Timed(Handle:hTimer)
-{
-	new amount = GetRandomInt(10, 50);
-	for (new i = 1; i <= MaxClients; i++)
-	{
-		if (!IsClientInGame(i) || IsFakeClient(i) || XenForo_IsProcessed(i)) continue;
-		
-		GiveClientCredits(i, amount);
-	}
-}
-
-public OnClientConnected(client)
+public void OnClientConnected(int client)
 {
 	iCredits[client] = 0;
 }
 
-public OnClientDisconnect(client)
+public void OnClientDisconnect(int client)
 {
 	iCredits[client] = 0;
 }
 
-public XF_OnProcessed(client)
+public void XF_OnProcessed(int client)
 {
-	new clientID = XenForo_GrabClientID(client);
+	int ID = XenForo_GrabClientID(client);
 	
-	new String:sQuery[1024];
-	FormatEx(sQuery, sizeof(sQuery), "SELECT credits FROM xf_user WHERE user_id = '%i';", clientID);	
+	char sQuery[1024];
+	Format(sQuery, sizeof(sQuery), "SELECT credits FROM xf_user WHERE user_id = '%i';", ID);
 	XenForo_TQuery(RetrieveCredits, sQuery, GetClientUserId(client));
 	XenForo_LogToFile(TRACE, "SQL QUERY: XF_OnProcessed - Query: %s", sQuery);
 }
 
-public RetrieveCredits(Handle:owner, Handle:hndl, const String:error[], any:data)
+public int RetrieveCredits(Handle owner, Handle hndl, const char[] error, any data)
 {
-	if (hndl == INVALID_HANDLE)
+	if (hndl == null)
 	{
 		XenForo_LogToFile(ERROR, "Error grabbing credits for UserID: '%s'", error);
 		return;
 	}
 	
-	new client = GetClientOfUserId(data);
+	int client = GetClientOfUserId(data);
 	
-	if (!client || !IsClientInGame(client))
+	if (client < 0 || !IsClientInGame(client))
 	{
 		return;
 	}
@@ -108,103 +141,105 @@ public RetrieveCredits(Handle:owner, Handle:hndl, const String:error[], any:data
 	if (SQL_FetchRow(hndl) && !SQL_IsFieldNull(hndl, 0))
 	{
 		iCredits[client] = SQL_FetchInt(hndl, 0);
+		XenForo_LogToFile(TRACE, "Credits pulled from SQL query for %N: %i", client, iCredits[client]);
 	}
 }
 
-public Native_GrabCredits(Handle:plugin, numParams)
+public int Native_GrabCredits(Handle plugin, int numParams)
 {
-	new client = GetNativeCell(1);
+	int client = GetNativeCell(1);
 	
 	if (!XenForo_IsProcessed(client))
 	{
-		ThrowNativeError(SP_ERROR_INDEX, "Client index %i is not currently processed.", client);
+		ThrowNativeError(SP_ERROR_INDEX, "%N is not currently processed.", client);
 	}
 	
 	return iCredits[client];
 }
 
-public Native_GiveCredits(Handle:plugin, numParams)
+public int Native_GiveCredits(Handle plugin, int numParams)
 {
-	new client = GetNativeCell(1);
-	new amount = GetNativeCell(2);
+	int client = GetNativeCell(1);
+	int amount = GetNativeCell(2);
 	
 	if (!XenForo_IsProcessed(client))
 	{
-		ThrowNativeError(SP_ERROR_INDEX, "Client index %i is not currently processed.", client);
+		ThrowNativeError(SP_ERROR_INDEX, "%N is not currently processed.", client);
 	}
 	
 	GiveClientCredits(client, amount);
 }
 
-GiveClientCredits(client, amount)
+void GiveClientCredits(int client, int amount)
 {
-	new credits = iCredits[client];
+	int credits = iCredits[client];
 	iCredits[client] = credits + amount;
-	new clientID = XenForo_GrabClientID(client);
+	int clientID = XenForo_GrabClientID(client);
 	
-	new String:sQuery[1024];
+	char sQuery[1024];
 	Format(sQuery, sizeof(sQuery), "UPDATE xf_user SET credits = '%i' WHERE user_id = '%i';", iCredits[client], clientID);
 	XenForo_TQuery(GiveCredits, sQuery, GetClientUserId(client));
-	XenForo_LogToFile(ERROR, "SQL Query: GiveClientCredits - Query: '%s'", sQuery);
+	XenForo_LogToFile(TRACE, "SQL Query: GiveClientCredits - Query: '%s'", sQuery);
 }
-public GiveCredits(Handle:owner, Handle:hndl, const String:error[], any:data)
+public int GiveCredits(Handle owner, Handle hndl, const char[] error, any data)
 {
-	new client = GetClientOfUserId(data);
+	int client = GetClientOfUserId(data);
 	
-	if (hndl == INVALID_HANDLE)
+	if (hndl == null)
 	{
 		XenForo_LogToFile(ERROR, "Error inserting credits value into database: '%s'", error);
 		CPrintToChat(client, "Error updating your credits, please contact an administrator.");
 		return;
 	}
-		
-	if (!client || !IsClientInGame(client))
+	
+	if (client < 0 || !IsClientInGame(client))
 	{
 		return;
 	}
-
+	
 	CPrintToChat(client, "You have been given credits. Your credits count is now at %i.", iCredits[client]);
 }
 
-public Native_DeductCredits(Handle:plugin, numParams)
+public int Native_DeductCredits(Handle plugin, int numParams)
 {
-	new client = GetNativeCell(1);
-	new amount = GetNativeCell(2);
+	int client = GetNativeCell(1);
+	int amount = GetNativeCell(2);
 	
 	if (!XenForo_IsProcessed(client))
 	{
-		ThrowNativeError(SP_ERROR_INDEX, "Client index %i is not currently processed.", client);
+		ThrowNativeError(SP_ERROR_INDEX, "%N is not currently processed.", client);
 	}
 	
 	DeductClientCredits(client, amount);
 }
 
-DeductClientCredits(client, amount)
+void DeductClientCredits(int client, int amount)
 {
-	new credits = iCredits[client];
+	int credits = iCredits[client];
 	iCredits[client] = credits - amount;
-	new clientID = XenForo_GrabClientID(client);
+	int clientID = XenForo_GrabClientID(client);
 	
-	new String:sQuery[1024];
+	char sQuery[1024];
 	Format(sQuery, sizeof(sQuery), "UPDATE xf_user SET credits = '%i' WHERE user_id = '%i';", iCredits[client], clientID);
 	XenForo_TQuery(DeductCredits, sQuery, GetClientUserId(client));
-	XenForo_LogToFile(ERROR, "SQL Query: DeductClientCredits - Query: '%s'", sQuery);
+	XenForo_LogToFile(TRACE, "SQL Query: DeductClientCredits - Query: '%s'", sQuery);
 }
-public DeductCredits(Handle:owner, Handle:hndl, const String:error[], any:data)
+
+public int DeductCredits(Handle owner, Handle hndl, const char[] error, any data)
 {
-	new client = GetClientOfUserId(data);
+	int client = GetClientOfUserId(data);
 	
-	if (hndl == INVALID_HANDLE)
+	if (hndl == null)
 	{
 		XenForo_LogToFile(ERROR, "Error inserting credits value into database: '%s'", error);
 		CPrintToChat(client, "Error updating your credits, please contact an administrator.");
 		return;
 	}
-		
-	if (!client || !IsClientInGame(client))
+	
+	if (client < 0 || !IsClientInGame(client))
 	{
 		return;
 	}
-
+	
 	CPrintToChat(client, "You have been deducted credits. Your credits count is now at %i.", iCredits[client]);
-}
+} 

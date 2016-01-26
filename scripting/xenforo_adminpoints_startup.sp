@@ -2,33 +2,35 @@
 
 //Required Includes
 #include <sourcemod>
+#include <multicolors>
+#include <extended_logging>
+#include <xenforo/xenforo_api>
 
-//API Natives/Forwards
-#include <xenforo_api>
+//New Syntax
+#pragma newdecls required
 
-#define PLUGIN_NAME     "XenForo API"
-#define PLUGIN_AUTHOR   "Keith Warren(Jack of Designs)"
-#define PLUGIN_VERSION  "1.0.0"
-#define PLUGIN_DESCRIPTION	"API for Xenforo forum installations."
-#define PLUGIN_CONTACT  "http://www.jackofdesigns.com/"
+//Defines
 
-new Start = -1;
+//Globals
+char sQuery_GrantAdminPoints[] = "UPDATE xf_user_field_value SET field_value = field_value + 2 WHERE user_id = '%i' AND field_id = 'adminpoints';";
 
-public Plugin:myinfo =
+int Start = -1;
+
+public Plugin myinfo = 
 {
-	name = PLUGIN_NAME,
-	author = PLUGIN_AUTHOR,
-	description = PLUGIN_DESCRIPTION,
-	version = PLUGIN_VERSION,
-	url = PLUGIN_CONTACT
+	name = "XenForo API", 
+	author = "Keith Warren(Drixevel)", 
+	description = "Grants admins points based on actions in the servers.", 
+	version = "1.0.0", 
+	url = "http://www.drixevel.com/"
 };
 
-public OnPluginStart()
+public void OnPluginStart()
 {
 	CreateTimer(60.0, GrantAdminPoints);
 }
 
-public XF_OnProcessed(client)
+public void XF_OnProcessed(int client)
 {
 	if (Start == -1 && CheckCommandAccess(client, "", ADMFLAG_GENERIC))
 	{
@@ -39,7 +41,7 @@ public XF_OnProcessed(client)
 	}
 }
 
-public OnClientDisconnect(client)
+public void OnClientDisconnect(int client)
 {
 	if (client == Start)
 	{
@@ -47,23 +49,21 @@ public OnClientDisconnect(client)
 	}
 }
 
-public Action:GrantAdminPoints(Handle:hTimer)
+public Action GrantAdminPoints(Handle hTimer)
 {
-	if (Start == -1) return Plugin_Continue;
+	int client = GetClientOfUserId(Start);
 	
-	new client = GetClientOfUserId(Start);
-	
-	if (GetRealClientCount() >= 12)
+	if (Start != -1 && GetRealClientCount() >= 12)
 	{
-		decl String:sQuery[64];
-		Format(sQuery, sizeof(sQuery), "UPDATE xf_user_field_value SET field_value = field_value + 2 WHERE user_id = '%i' AND field_id = 'adminpoints'", XenForo_GrabClientID(client));
+		char sQuery[MAX_QUERY_SIZE];
+		Format(sQuery, sizeof(sQuery), sQuery_GrantAdminPoints, XenForo_GrabClientID(client));
 		XenForo_TQuery(AddPoints, sQuery);
 	}
 	
 	return Plugin_Continue;
 }
 
-public AddPoints(Handle:owner, Handle:hndl, const String:error[], any:data)
+public void AddPoints(Handle owner, Handle hndl, const char[] error, any data)
 {
 	if (hndl == INVALID_HANDLE)
 	{
@@ -71,21 +71,25 @@ public AddPoints(Handle:owner, Handle:hndl, const String:error[], any:data)
 		return;
 	}
 	
-	new client = GetClientOfUserId(Start);
+	int client = GetClientOfUserId(Start);
 	
-	if (!client) return;
-	PrintToChat(client, "You have received 2 admin points!");
+	if (client > 0)
+	{
+		PrintToChat(client, "You have received 2 admin points!");
+	}
 }
 
-GetRealClientCount( bool:inGameOnly = true )
+int GetRealClientCount(bool inGameOnly = true)
 {
-	new clients = 0;
-	for( new i = 0; i < GetMaxClients(); i++ )
+	int clients = 0;
+	
+	for (int i = 0; i < GetMaxClients(); i++)
 	{
-		if( ( ( inGameOnly ) ? IsClientInGame( i ) : IsClientConnected( i ) ) && !IsFakeClient( i ) )
+		if ((inGameOnly ? IsClientInGame(i) : IsClientConnected(i)) && !IsFakeClient(i))
 		{
 			clients++;
 		}
 	}
+	
 	return clients;
-}
+} 

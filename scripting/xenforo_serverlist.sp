@@ -2,53 +2,51 @@
 
 //Required Includes
 #include <sourcemod>
+#include <multicolors>
+#include <extended_logging>
+#include <xenforo/xenforo_api>
 
-//API Natives/Forwards
-#include <xenforo_api>
+//New Syntax
+#pragma newdecls required
 
+//Defines
 #define PLUGIN_NAME     "XenForo Servers List"
-#define PLUGIN_AUTHOR   "Keith Warren(Jack of Designs)"
+#define PLUGIN_AUTHOR   "Keith Warren(Drixevel)"
 #define PLUGIN_VERSION  "1.0.0"
 #define PLUGIN_DESCRIPTION	"List all servers and allow connections to them."
-#define PLUGIN_CONTACT  "http://www.jackofdesigns.com/"
+#define PLUGIN_CONTACT  "http://www.drixevel.com/"
 
-new Handle:hMenu = INVALID_HANDLE;
+Handle hMenu;
 
-public Plugin:myinfo =
+public Plugin myinfo = 
 {
-	name = PLUGIN_NAME,
-	author = PLUGIN_AUTHOR,
-	description = PLUGIN_DESCRIPTION,
-	version = PLUGIN_VERSION,
+	name = PLUGIN_NAME, 
+	author = PLUGIN_AUTHOR, 
+	description = PLUGIN_DESCRIPTION, 
+	version = PLUGIN_VERSION, 
 	url = PLUGIN_CONTACT
 };
 
-public OnPluginStart()
+public void OnPluginStart()
 {
 	RegConsoleCmd("sm_servers", ServersList);
-}
-
-public OnConfigsExecuted()
-{
-	if (hMenu != INVALID_HANDLE)
-	{
-		CloseHandle(hMenu);
-		hMenu = INVALID_HANDLE;
-	}
 	
 	hMenu = CreateMenu(MenuHandler);
 	SetMenuTitle(hMenu, "Pick a Server:");
 	SetMenuExitButton(hMenu, true);
-	
+}
+
+public void OnConfigsExecuted()
+{
 	if (XenForo_IsConnected())
 	{
-		decl String:sQuery[1024];
+		char sQuery[1024];
 		FormatEx(sQuery, sizeof(sQuery), "SELECT option_value FROM `xf_option` WHERE option_id = 'stentor_server_ips' ");
 		XenForo_TQuery(QueryServers, sQuery);
 	}
 }
 
-public Action:ServersList(client, args)
+public Action ServersList(int client, int args)
 {
 	if (!IsClientInGame(client))
 	{
@@ -56,50 +54,38 @@ public Action:ServersList(client, args)
 		return Plugin_Handled;
 	}
 	
-	if (!DisplayMenu(hMenu, client, MENU_TIME_FOREVER))
-	{
-		PrintToChat(client, "Menu cannot be displayed, please contact an administrator.");
-	}
-	
+	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
 	return Plugin_Handled;
 }
 
-public QueryServers(Handle:owner, Handle:hndl, const String:error[], any:data)
+public int QueryServers(Handle owner, Handle hndl, const char[] error, any data)
 {
-	if (hndl == INVALID_HANDLE)
+	if (hndl == null)
 	{
 		XenForo_LogToFile(TRACE, "Error parsing servers: '%s'", error);
 		return;
 	}
 	
-	new rows = SQL_GetRowCount(hndl);
-
-	if (rows > 0)
+	while (SQL_FetchRow(hndl))
 	{
-		if (GetMenuItemCount(hMenu) > 0)
-		{
-			RemoveAllMenuItems(hMenu);
-		}
+		char sIP[256];
+		SQL_FetchString(hndl, 0, sIP, sizeof(sIP));
 		
-		for (new i = 0; i < rows; i++)
-		{
-			SQL_FetchRow(hndl);
-			
-			decl String:sIPAddresses[256];
-			SQL_FetchString(hndl, i, sIPAddresses, sizeof(sIPAddresses));
-			
-			AddMenuItem(hMenu, sIPAddresses, sIPAddresses);
-		}
+		AddMenuItem(hMenu, sIP, sIP);
 	}
 }
 
-public MenuHandler(Handle:menu, MenuAction:action, param1, param2)
+public int MenuHandler(Handle menu, MenuAction action, int param1, int param2)
 {
 	switch (action)
 	{
 		case MenuAction_Select:
-			{
-				
-			}
+		{
+			
+		}
+		case MenuAction_End:
+		{
+			CloseHandle(menu);
+		}
 	}
-}
+} 

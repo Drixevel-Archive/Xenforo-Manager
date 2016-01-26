@@ -2,70 +2,72 @@
 
 //Required Includes
 #include <sourcemod>
+#include <multicolors>
+#include <extended_logging>
+#include <xenforo/xenforo_api>
 
-//API Natives/Forwards
-#include <xenforo_api>
+//New Syntax
+#pragma newdecls required
 
-#define PLUGIN_NAME     "XenForo API"
-#define PLUGIN_AUTHOR   "Keith Warren(Jack of Designs)"
+//Defines
+#define PLUGIN_NAME     "XenForo User Menu"
+#define PLUGIN_AUTHOR   "Keith Warren(Drixevel)"
 #define PLUGIN_VERSION  "1.0.0"
-#define PLUGIN_DESCRIPTION	"API for Xenforo forum installations."
-#define PLUGIN_CONTACT  "http://www.jackofdesigns.com/"
+#define PLUGIN_DESCRIPTION	"Grants access to XenForo user menu to display information."
+#define PLUGIN_CONTACT  "http://www.drixevel.com/"
 #define TAG  "[User]"
 
 enum PlayerData
 {
-	String:sUsername[MAX_NAME_LENGTH],
-	Float:fCredits,
+	String:sUsername[MAX_NAME_LENGTH], 
+	Float:fCredits, 
 	iAdminPoints
 }
 
-new g_PlayerData[MAXPLAYERS+1][PlayerData];
+int g_PlayerData[MAXPLAYERS + 1][PlayerData];
 
-public Plugin:myinfo =
+public Plugin myinfo = 
 {
-	name = PLUGIN_NAME,
-	author = PLUGIN_AUTHOR,
-	description = PLUGIN_DESCRIPTION,
-	version = PLUGIN_VERSION,
+	name = PLUGIN_NAME, 
+	author = PLUGIN_AUTHOR, 
+	description = PLUGIN_DESCRIPTION, 
+	version = PLUGIN_VERSION, 
 	url = PLUGIN_CONTACT
 };
 
-public OnPluginStart()
+public void OnPluginStart()
 {
 	RegConsoleCmd("sm_xfmenu", XenForoMenu);
 }
 
-public XF_OnProcessed(client)
+public void XF_OnProcessed(int client)
 {
 	g_PlayerData[client][iAdminPoints] = 0;
 	
-	decl String:sQuery[64];
+	char sQuery[2048];
 	Format(sQuery, sizeof(sQuery), "SELECT field_value FROM xf_user_field_value WHERE user_id = '%i' AND field_id = 'adminpoints'", XenForo_GrabClientID(client));
 	XenForo_TQuery(GrabAdminPoints, sQuery, GetClientUserId(client));
 }
 
-public GrabAdminPoints(Handle:owner, Handle:hndl, const String:error[], any:data)
+public int GrabAdminPoints(Handle owner, Handle hndl, const char[] error, any data)
 {
-	if (hndl == INVALID_HANDLE)
+	if (hndl == null)
 	{
 		XenForo_LogToFile(DEFAULT, "Error grabbing Admin Points: '%s'", error);
 		return;
 	}
 	
-	new client = GetClientOfUserId(data);
+	int client = GetClientOfUserId(data);
 	
-	if (!client) return;
-	
-	if (SQL_FetchRow(hndl))
-	{	
+	if (client > 0 && SQL_FetchRow(hndl))
+	{
 		g_PlayerData[client][iAdminPoints] = SQL_FetchInt(hndl, 0);
 	}
 }
 
-public Action:XenForoMenu(client, args)
+public Action XenForoMenu(int client, int args)
 {
-	new xfid = XenForo_GrabClientID(client);
+	int xfid = XenForo_GrabClientID(client);
 	
 	if (xfid == -1)
 	{
@@ -73,14 +75,14 @@ public Action:XenForoMenu(client, args)
 		return Plugin_Handled;
 	}
 	
-	decl String:sQuery[64];
+	char sQuery[64];
 	Format(sQuery, sizeof(sQuery), "SELECT * FROM xf_user WHERE user_id = '%i' ", xfid);
 	XenForo_TQuery(DisplayUserInfo, sQuery, GetClientUserId(client));
 	
 	return Plugin_Handled;
 }
 
-public DisplayUserInfo(Handle:owner, Handle:hndl, const String:error[], any:data)
+public void DisplayUserInfo(Handle owner, Handle hndl, const char[] error, any data)
 {
 	if (hndl == INVALID_HANDLE)
 	{
@@ -88,30 +90,33 @@ public DisplayUserInfo(Handle:owner, Handle:hndl, const String:error[], any:data
 		return;
 	}
 	
-	new client = GetClientOfUserId(data);
+	int client = GetClientOfUserId(data);
 	
-	if (!client) return;
+	if (client < 0)
+	{
+		return;
+	}
 	
-	new Handle:hMenu = CreateMenu(MenuHandler);
+	Handle hMenu = CreateMenu(MenuHandler);
 	SetMenuTitle(hMenu, "Website Account Info");
 	SetMenuExitButton(hMenu, true);
 	
 	if (SQL_FetchRow(hndl))
 	{
-		new field_id;
+		int field_id;
 		
-		new String:sName[128];
+		char sName[128];
 		SQL_FieldNameToNum(hndl, "username", field_id);
 		SQL_FetchString(hndl, field_id, sName, sizeof(sName));
 		AddMenuItem(hMenu, "", sName);
 		
-		new String:sCredits[128], Float:fCreditsT;
+		char sCredits[128]; float fCreditsT;
 		SQL_FieldNameToNum(hndl, "credits", field_id);
 		fCreditsT = SQL_FetchFloat(hndl, field_id);
 		Format(sCredits, sizeof(sCredits), "Credits: %f", fCreditsT);
 		AddMenuItem(hMenu, "", sCredits);
 		
-		new String:sAdminPoints[128];
+		char sAdminPoints[128];
 		Format(sAdminPoints, sizeof(sAdminPoints), "Admin Points: %i", g_PlayerData[client][iAdminPoints]);
 		AddMenuItem(hMenu, "", sAdminPoints);
 	}
@@ -119,17 +124,17 @@ public DisplayUserInfo(Handle:owner, Handle:hndl, const String:error[], any:data
 	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
 }
 
-public MenuHandler(Handle:hMenu, MenuAction:action, param1, param2)
+public int MenuHandler(Handle hMenu, MenuAction action, int param1, int param2)
 {
 	switch (action)
 	{
-	case MenuAction_Select:
+		case MenuAction_Select:
 		{
-		
+			
 		}
-	case MenuAction_End:
+		case MenuAction_End:
 		{
 			CloseHandle(hMenu);
 		}
 	}
-}
+} 
